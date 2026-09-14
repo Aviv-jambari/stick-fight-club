@@ -36,7 +36,7 @@ Enemies telegraph attacks with a red marker. Heavyweights arrive after 35 second
 
 - `src/game/Arena.ts`: scene, combat orchestration, AI, spawn loop, body integration, HUD, restart.
 - `src/game/Fighter.ts`: fighter state and attack data.
-- `src/game/StickFigure.ts`: rounded articulated limbs, two-segment joint solving, grounded fighting stances, smoothed attack poses and body-centered launch rotation.
+- `src/game/StickFigure.ts`: rounded articulated limbs, two-segment joint solving, grounded fighting stances, smoothed attack poses and body-centered launch rotation. Poses carry explicit foot targets, so each leg moves independently. `step()` is a stance/swing walk cycle: a planted foot slides backward at a constant rate while the swing leg lifts and eases forward, and cadence is derived from actual movement speed so feet never skate.
 - `src/game/Hallway.ts`: repeating hallway architecture and parallax marks; the scene follows the player horizontally while the HUD stays fixed.
 - `src/game/Input.ts`: keyboard-to-action adapter, separated for a future controller adapter.
 - `src/game/balance.ts`: difficulty caps, health, movement and score tuning.

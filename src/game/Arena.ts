@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { B, REACH, difficulty, killValue } from './balance';
 import { Fighter } from './Fighter';
-import { StickFigure, STRIDE } from './StickFigure';
+import { StickFigure, STRIDE, figureScale } from './StickFigure';
 import { Input, type Action } from './Input';
 import { Sound } from './Sound';
 import { Hallway } from './Hallway';
@@ -191,7 +191,7 @@ export class Arena extends Phaser.Scene {
             f.invulnerable -= dt;
             f.projectile -= dt;
             // Cadence follows real speed, so a planted foot travels exactly one stride per step.
-            f.phase += dt * (f.moving && f.speed > 0 ? f.speed / (STRIDE.reach * 2) * Math.PI * 2 : 3);
+            f.phase += dt * (f.moving && f.speed > 0 ? f.speed / (STRIDE.reach * 2 * figureScale(f)) * Math.PI * 2 : 3);
             if (f.dead) {
                 f.deathTime += dt;
             }

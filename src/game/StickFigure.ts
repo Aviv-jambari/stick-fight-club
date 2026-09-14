@@ -2,11 +2,18 @@ import Phaser from 'phaser';
 import { B } from './balance';
 import { Fighter } from './Fighter';
 
-/** Silhouette weights, taken from reference stick animation as ratios of the ~117 unit figure height. */
-const FIGURE = { limb: 14, torso: 19, fattyLimb: 20, fattyTorso: 38, head: 15, headDrop: 19, fist: 1.35, foot: 13, footWidth: 10 };
+/** Silhouette weights. Thinner than the StickNodes stills so limbs read as sticks, not sausages. */
+const FIGURE = { limb: 10, torso: 13, fattyLimb: 15, fattyTorso: 28, head: 13, headDrop: 16, fist: 1.25, foot: 11, footWidth: 8 };
 
-/** Half a step, the peak toe clearance, and the fraction of a cycle a foot stays planted. */
-export const STRIDE = { reach: 34, lift: 17, stance: .62 };
+/**
+ * Half a step, the peak toe clearance, and the fraction of a cycle a foot stays planted.
+ * reach must stay under sqrt(LEG^2 - hip^2) or the leg solver clamps at full extension and
+ * the planted foot silently leaves the floor.
+ */
+export const STRIDE = { reach: 36, lift: 17, stance: .62 };
+/** Standing hip height and the length of each of the two leg segments. Total leg exceeds the
+ *  hip height on purpose, so knees stay bent in a fighting crouch and the stride can open up. */
+export const RIG = { hip: 54, leg: 35 };
 
 /**
  * One foot through a walk cycle. Planted feet slide backward under the hip at a constant
@@ -23,18 +30,21 @@ export function step(cycle: number): Point {
 type Point = [number, number];
 type Pose = { hipX: number; hipY: number; lean: number; frontX: number; frontY: number; backX: number; backY: number; frontFootX: number; frontFootY: number; backFootX: number; backFootY: number; kick: number };
 
+/** Drawn size of a fighter. Stride cadence needs this too, since it scales the step length. */
+export const figureScale = (f: Fighter) => (f.fatty ? 1.35 : 1) * B.figureScale;
+
 /** Neutral fighting stance: fists at the chin, feet apart. */
-const GUARD = { frontX: 19, frontY: -103, backX: 0, backY: -98, frontFootX: 27, backFootX: -29 };
+const GUARD = { frontX: 19, frontY: -103, backX: 0, backY: -98, frontFootX: 24, backFootX: -26 };
 
 export class StickFigure {
     g: Phaser.GameObjects.Graphics;
-    pose: Pose = { hipX: 0, hipY: -54, lean: 5, ...GUARD, frontFootY: 0, backFootY: 0, kick: 0 };
+    pose: Pose = { hipX: 0, hipY: -RIG.hip, lean: 5, ...GUARD, frontFootY: 0, backFootY: 0, kick: 0 };
     constructor(scene: Phaser.Scene) { this.g = scene.add.graphics(); }
 
     draw(f: Fighter) {
         const g = this.g;
         g.clear().setDepth(f.player ? 610 : f.held ? 620 : 600);
-        const scale = (f.fatty ? 1.35 : 1) * B.figureScale;
+        const scale = figureScale(f);
         const alpha = f.dead ? Math.max(0, 1 - Math.max(0, f.deathTime - 1.4) / 1.2) : 1;
         const bodyColor = f.player ? 0x111111 : 0x791f2a;
         const air = f.z > 5;
@@ -44,8 +54,8 @@ export class StickFigure {
         const back = run ? step(cycle + .5) : [GUARD.backFootX, 0] as Point;
         const target: Pose = {
             hipX: 0,
-            // Hips dip through double support and rise over mid-stance, so twice per cycle.
-            hipY: -54 + (run ? 3.5 - 3.5 * Math.cos(2 * f.phase) : Math.sin(f.phase) * 1.2),
+            // Hips sit lowest through double support and rise over mid-stance, so twice per cycle.
+            hipY: -RIG.hip + (run ? -3 + 3 * Math.cos(2 * f.phase) : Math.sin(f.phase) * 1.2),
             lean: run ? 10 : 5, ...GUARD,
             frontFootX: front[0], frontFootY: front[1],
             backFootX: back[0], backFootY: back[1],
@@ -159,7 +169,7 @@ export class StickFigure {
             // A wider cap at the tip reads as a fist rather than a tapering line.
             if (cap > 1) g.fillStyle(bodyColor, alpha).fillCircle(...transform(tip), width * scale / 2 * cap);
         };
-        g.fillStyle(0x171717, .09 * alpha).fillEllipse(f.x, f.y + 3, (f.fatty ? 88 : 62) * Math.max(.35, 1 - f.z / 650), 8);
+        g.fillStyle(0x171717, .09 * alpha).fillEllipse(f.x, f.y + 3, (f.fatty ? 72 : 50) * Math.max(.35, 1 - f.z / 650), 7);
         const hip: Point = [p.hipX, p.hipY];
         const chest: Point = [p.hipX + p.lean, p.hipY - 37];
         const frontFoot: Point = [p.frontFootX, p.frontFootY];
@@ -172,16 +182,20 @@ export class StickFigure {
         }
         if (f.attack?.limb === 'foot' && f.attack.kind === 'upper') frontFoot[1] -= p.kick * 35;
         const weight = f.fatty ? FIGURE.fattyLimb : FIGURE.limb;
-        const foot = (ankle: Point) => stroke(ankle, [ankle[0] + FIGURE.foot, ankle[1] - 3], FIGURE.footWidth);
-        limb(hip, backFoot, 31, -1, weight);
+        // A lifted foot points its toe down, the way a swing leg does.
+        const foot = (ankle: Point) => {
+            const toe = Math.min(1, Math.max(0, -ankle[1] / STRIDE.lift));
+            stroke(ankle, [ankle[0] + FIGURE.foot * (1 - .35 * toe), ankle[1] - 3 + FIGURE.foot * .7 * toe], FIGURE.footWidth);
+        };
+        limb(hip, backFoot, RIG.leg, -1, weight);
         foot(backFoot);
         limb(chest, [p.backX, p.backY], 25, 1, weight, FIGURE.fist);
         stroke(hip, chest, f.fatty ? FIGURE.fattyTorso : FIGURE.torso);
         if (f.fatty) {
-            stroke([hip[0] - 7, hip[1] - 4], [chest[0] - 8, chest[1] + 7], 34);
-            stroke([chest[0] - 11, chest[1] + 9], [chest[0] + 11, chest[1] + 9], 8);
+            stroke([hip[0] - 7, hip[1] - 4], [chest[0] - 8, chest[1] + 7], 24);
+            stroke([chest[0] - 11, chest[1] + 9], [chest[0] + 11, chest[1] + 9], 6);
         }
-        limb(hip, frontFoot, 31, -1, weight);
+        limb(hip, frontFoot, RIG.leg, -1, weight);
         foot(frontFoot);
         limb(chest, [p.frontX, p.frontY], 27, 1, weight, FIGURE.fist);
         // No neck: the head circle overlaps the shoulder mass, as in the reference.

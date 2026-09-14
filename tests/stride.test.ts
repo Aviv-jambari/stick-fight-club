@@ -15,7 +15,7 @@ function load(file: string): any {
     cache.set(file, mod.exports);
     return mod.exports;
 }
-const { step, STRIDE } = load('src/game/StickFigure.ts');
+const { step, STRIDE, RIG } = load('src/game/StickFigure.ts');
 const planted = (cycle: number) => step(cycle)[1] === 0;
 
 test('a planted foot slides backward at a constant rate, which is what reads as ground contact', () => {
@@ -46,6 +46,13 @@ test('the cycle is seamless where it wraps and where stance hands off to swing',
 });
 test('a full cycle covers exactly one stride, so cadence can be matched to speed', () => {
     assert.ok(Math.abs(step(0)[0] - step(STRIDE.stance - 1e-12)[0] - STRIDE.reach * 2) < 1e-6);
+});
+test('the stride stays inside what the leg can reach with the foot on the floor', () => {
+    // Overshoot this and the two-segment solver clamps at full extension, so the planted
+    // foot silently lifts off the floor and the walk goes back to skating.
+    const maxReach = Math.sqrt((RIG.leg * 2) ** 2 - RIG.hip ** 2);
+    assert.ok(STRIDE.reach < maxReach, `reach ${STRIDE.reach} exceeds leg reach ${maxReach.toFixed(1)}`);
+    assert.ok(RIG.leg * 2 > RIG.hip, 'knees must be bent when standing');
 });
 test('negative and large cycle values wrap instead of breaking', () => {
     assert.deepEqual(step(-.25), step(.75));
