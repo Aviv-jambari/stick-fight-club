@@ -31,6 +31,8 @@ export class Fighter {
     angle = 0;
     phase = 0;
     moving = false;
+    /** Locomotion speed applied this frame; drives stride cadence so feet do not skate. */
+    speed = 0;
     charge = 0;
     attack?: Attack;
     held = false;

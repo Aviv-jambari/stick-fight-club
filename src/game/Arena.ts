@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { B, REACH, difficulty, killValue } from './balance';
 import { Fighter } from './Fighter';
-import { StickFigure } from './StickFigure';
+import { StickFigure, STRIDE } from './StickFigure';
 import { Input, type Action } from './Input';
 import { Sound } from './Sound';
 import { Hallway } from './Hallway';
@@ -178,16 +178,20 @@ export class Arena extends Phaser.Scene {
         }
         const canMove = p.stun <= 0 && !p.attack && p.invulnerable < .12;
         this.stamina.update(dt, this.controls.running() && !!axis.x && canMove && p.z === 0);
+        p.speed = 0;
         if (canMove) {
-            p.x += axis.x * (this.stamina.running ? SPRINT.speed : B.playerSpeed) * dt;
+            const speed = this.stamina.running ? SPRINT.speed : B.playerSpeed;
+            p.x += axis.x * speed * dt;
             p.moving = !!axis.x;
+            if (axis.x) p.speed = speed;
         }
         for (const f of this.fighters) {
             f.cooldown -= dt;
             f.stun -= dt;
             f.invulnerable -= dt;
             f.projectile -= dt;
-            f.phase += dt * (f.moving ? 14 : 3);
+            // Cadence follows real speed, so a planted foot travels exactly one stride per step.
+            f.phase += dt * (f.moving && f.speed > 0 ? f.speed / (STRIDE.reach * 2) * Math.PI * 2 : 3);
             if (f.dead) {
                 f.deathTime += dt;
             }
@@ -334,6 +338,7 @@ export class Arena extends Phaser.Scene {
     }
     ai(f: Fighter, dt: number) {
         f.moving = false;
+        f.speed = 0;
         if (f.stun > 0 || f.z > 5 || f.dead)
             return;
         const p = this.player, dx = p.x - f.x;
@@ -356,6 +361,7 @@ export class Arena extends Phaser.Scene {
             const speed = difficulty(this.elapsed).speed * (f.fatty ? .68 : 1);
             f.x += Math.sign(dx) * speed * dt;
             f.moving = true;
+            f.speed = speed;
         }
         for (const other of this.fighters)
             if (other !== f && !other.dead && !other.player && other.z < 5 && Math.abs(f.x - other.x) < REACH.aiSpread)

@@ -5,12 +5,30 @@ import { Fighter } from './Fighter';
 /** Silhouette weights, taken from reference stick animation as ratios of the ~117 unit figure height. */
 const FIGURE = { limb: 14, torso: 19, fattyLimb: 20, fattyTorso: 38, head: 15, headDrop: 19, fist: 1.35, foot: 13, footWidth: 10 };
 
+/** Half a step, the peak toe clearance, and the fraction of a cycle a foot stays planted. */
+export const STRIDE = { reach: 34, lift: 17, stance: .62 };
+
+/**
+ * One foot through a walk cycle. Planted feet slide backward under the hip at a constant
+ * rate, which is what reads as ground contact; the swing leg then lifts and eases forward.
+ */
+export function step(cycle: number): Point {
+    const p = ((cycle % 1) + 1) % 1;
+    if (p < STRIDE.stance) return [STRIDE.reach * (1 - 2 * (p / STRIDE.stance)), 0];
+    const t = (p - STRIDE.stance) / (1 - STRIDE.stance);
+    const ease = t * t * (3 - 2 * t);
+    return [STRIDE.reach * (2 * ease - 1), -Math.sin(Math.PI * t) * STRIDE.lift];
+}
+
 type Point = [number, number];
-type Pose = { hipX: number; hipY: number; lean: number; frontX: number; frontY: number; backX: number; backY: number; stride: number; kick: number };
+type Pose = { hipX: number; hipY: number; lean: number; frontX: number; frontY: number; backX: number; backY: number; frontFootX: number; frontFootY: number; backFootX: number; backFootY: number; kick: number };
+
+/** Neutral fighting stance: fists at the chin, feet apart. */
+const GUARD = { frontX: 19, frontY: -103, backX: 0, backY: -98, frontFootX: 27, backFootX: -29 };
 
 export class StickFigure {
     g: Phaser.GameObjects.Graphics;
-    pose: Pose = { hipX: 0, hipY: -54, lean: 5, frontX: 30, frontY: -86, backX: 10, backY: -80, stride: 0, kick: 0 };
+    pose: Pose = { hipX: 0, hipY: -54, lean: 5, ...GUARD, frontFootY: 0, backFootY: 0, kick: 0 };
     constructor(scene: Phaser.Scene) { this.g = scene.add.graphics(); }
 
     draw(f: Fighter) {
@@ -21,20 +39,30 @@ export class StickFigure {
         const bodyColor = f.player ? 0x111111 : 0x791f2a;
         const air = f.z > 5;
         const run = f.moving && !air && !f.attack;
-        const stride = run ? Math.sin(f.phase) : 0;
+        const cycle = f.phase / (Math.PI * 2);
+        const front = run ? step(cycle) : [GUARD.frontFootX, 0] as Point;
+        const back = run ? step(cycle + .5) : [GUARD.backFootX, 0] as Point;
         const target: Pose = {
-            hipX: 0, hipY: -54 + (run ? Math.abs(Math.cos(f.phase)) * 3 : Math.sin(f.phase) * 1.2),
-            lean: run ? 13 : 5, frontX: 30, frontY: -87,
-            backX: 9, backY: -79, stride, kick: 0,
+            hipX: 0,
+            // Hips dip through double support and rise over mid-stance, so twice per cycle.
+            hipY: -54 + (run ? 3.5 - 3.5 * Math.cos(2 * f.phase) : Math.sin(f.phase) * 1.2),
+            lean: run ? 10 : 5, ...GUARD,
+            frontFootX: front[0], frontFootY: front[1],
+            backFootX: back[0], backFootY: back[1],
+            kick: 0,
         };
         if (run) {
-            target.frontX = 12 - stride * 22; target.frontY = -72;
-            target.backX = 12 + stride * 22; target.backY = -76;
+            // The guard stays up; arms counter-swing only slightly, as in the reference.
+            const swing = Math.sin(f.phase) * 6;
+            target.frontX = GUARD.frontX - swing;
+            target.backX = GUARD.backX + swing * .6;
         }
         if (air) {
             target.lean = -7;
             target.frontX = -8; target.frontY = -75;
             target.backX = -22; target.backY = -88;
+            target.frontFootX = 10; target.frontFootY = -39;
+            target.backFootX = -25; target.backFootY = -15;
         }
         if (f.attack) {
             const t = f.attack.time / f.attack.duration;
@@ -75,7 +103,9 @@ export class StickFigure {
         }
         if (f.telegraph > 0) { target.frontX = -19; target.frontY = -96; target.lean = -9; }
         if (f.stun > 0) {
-            target.stride = 0; target.kick = 0;
+            target.kick = 0;
+            target.frontFootX = GUARD.frontFootX; target.frontFootY = 0;
+            target.backFootX = GUARD.backFootX; target.backFootY = 0;
             target.hipY = -47;
             target.lean = f.hurtStyle === 0 ? -23 : 22;
             target.frontX = f.hurtStyle === 0 ? 13 : 24;
@@ -87,7 +117,9 @@ export class StickFigure {
             target.hipY = -52; target.lean = -7; target.hipX = 0;
             target.frontX = 27; target.frontY = -65;
             target.backX = -23; target.backY = -74;
-            target.stride = 0; target.kick = 0;
+            target.frontFootX = 24; target.frontFootY = 0;
+            target.backFootX = -26; target.backFootY = 0;
+            target.kick = 0;
         }
         if (f.held) { target.frontX = 28; target.frontY = -108; target.backX = -24; target.backY = -97; }
         const blend = f.hurtHold > 0 ? 1 : 1 - Math.exp(-38 * Math.min(g.scene.game.loop.delta / 1000, .05));
@@ -130,8 +162,8 @@ export class StickFigure {
         g.fillStyle(0x171717, .09 * alpha).fillEllipse(f.x, f.y + 3, (f.fatty ? 88 : 62) * Math.max(.35, 1 - f.z / 650), 8);
         const hip: Point = [p.hipX, p.hipY];
         const chest: Point = [p.hipX + p.lean, p.hipY - 37];
-        const frontFoot: Point = air ? [10, -39] : [20 + p.stride * 28, -Math.max(0, p.stride) * 13];
-        const backFoot: Point = air ? [-25, -15] : [-21 - p.stride * 28, -Math.max(0, -p.stride) * 13];
+        const frontFoot: Point = [p.frontFootX, p.frontFootY];
+        const backFoot: Point = [p.backFootX, p.backFootY];
         frontFoot[0] += p.kick * 47; frontFoot[1] -= p.kick * 65;
         if (air && f.attack?.limb === 'foot' && f.attack.kind === 'slam') {
             frontFoot[0] = 10 + p.kick * 50;
