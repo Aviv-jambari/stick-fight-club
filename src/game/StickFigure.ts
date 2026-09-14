@@ -1,5 +1,9 @@
 import Phaser from 'phaser';
+import { B } from './balance';
 import { Fighter } from './Fighter';
+
+/** Silhouette weights, taken from reference stick animation as ratios of the ~117 unit figure height. */
+const FIGURE = { limb: 14, torso: 19, fattyLimb: 20, fattyTorso: 38, head: 15, headDrop: 19, fist: 1.35, foot: 13, footWidth: 10 };
 
 type Point = [number, number];
 type Pose = { hipX: number; hipY: number; lean: number; frontX: number; frontY: number; backX: number; backY: number; stride: number; kick: number };
@@ -12,7 +16,7 @@ export class StickFigure {
     draw(f: Fighter) {
         const g = this.g;
         g.clear().setDepth(f.player ? 610 : f.held ? 620 : 600);
-        const scale = f.fatty ? 1.35 : 1;
+        const scale = (f.fatty ? 1.35 : 1) * B.figureScale;
         const alpha = f.dead ? Math.max(0, 1 - Math.max(0, f.deathTime - 1.4) / 1.2) : 1;
         const bodyColor = f.player ? 0x111111 : 0x791f2a;
         const air = f.z > 5;
@@ -98,7 +102,7 @@ export class StickFigure {
             y = (y + (tumbling ? 60 : 0)) * scale;
             return [f.x + x * Math.cos(angle) - y * Math.sin(angle), centerY + x * Math.sin(angle) + y * Math.cos(angle)];
         };
-        const stroke = (a: Point, b: Point, width = 7, color = bodyColor) => {
+        const stroke = (a: Point, b: Point, width = FIGURE.limb, color = bodyColor) => {
             const start = transform(a), end = transform(b);
             const radius = width * scale / 2;
             // Layered translucent silhouettes provide a soft directional blur in Canvas and WebGL.
@@ -112,7 +116,7 @@ export class StickFigure {
             g.lineStyle(radius * 2, color, alpha).lineBetween(...start, ...end);
             g.fillStyle(color, alpha).fillCircle(...start, radius).fillCircle(...end, radius);
         };
-        const limb = (root: Point, end: Point, length: number, bend: number, width = 7) => {
+        const limb = (root: Point, end: Point, length: number, bend: number, width = FIGURE.limb, cap = 1) => {
             const dx = end[0] - root[0], dy = end[1] - root[1];
             const distance = Math.max(.01, Math.hypot(dx, dy));
             const reach = Math.min(distance, length * 2 - .01);
@@ -120,8 +124,10 @@ export class StickFigure {
             const height = Math.sqrt(Math.max(0, length * length - reach * reach / 4));
             const joint: Point = [(root[0] + tip[0]) / 2 - dy / distance * height * bend, (root[1] + tip[1]) / 2 + dx / distance * height * bend];
             stroke(root, joint, width); stroke(joint, tip, width);
+            // A wider cap at the tip reads as a fist rather than a tapering line.
+            if (cap > 1) g.fillStyle(bodyColor, alpha).fillCircle(...transform(tip), width * scale / 2 * cap);
         };
-        g.fillStyle(0x171717, .09 * alpha).fillEllipse(f.x, f.y + 3, (f.fatty ? 76 : 53) * Math.max(.35, 1 - f.z / 650), 7);
+        g.fillStyle(0x171717, .09 * alpha).fillEllipse(f.x, f.y + 3, (f.fatty ? 88 : 62) * Math.max(.35, 1 - f.z / 650), 8);
         const hip: Point = [p.hipX, p.hipY];
         const chest: Point = [p.hipX + p.lean, p.hipY - 37];
         const frontFoot: Point = air ? [10, -39] : [20 + p.stride * 28, -Math.max(0, p.stride) * 13];
@@ -133,33 +139,33 @@ export class StickFigure {
             backFoot[0] = -27; backFoot[1] = -31;
         }
         if (f.attack?.limb === 'foot' && f.attack.kind === 'upper') frontFoot[1] -= p.kick * 35;
-        const weight = f.fatty ? 10 : 7;
+        const weight = f.fatty ? FIGURE.fattyLimb : FIGURE.limb;
+        const foot = (ankle: Point) => stroke(ankle, [ankle[0] + FIGURE.foot, ankle[1] - 3], FIGURE.footWidth);
         limb(hip, backFoot, 31, -1, weight);
-        stroke(backFoot, [backFoot[0] + 9, backFoot[1]], weight);
-        limb(chest, [p.backX, p.backY], 25, 1, weight);
-        stroke(hip, chest, f.fatty ? 28 : 9);
+        foot(backFoot);
+        limb(chest, [p.backX, p.backY], 25, 1, weight, FIGURE.fist);
+        stroke(hip, chest, f.fatty ? FIGURE.fattyTorso : FIGURE.torso);
         if (f.fatty) {
-            stroke([hip[0] - 7, hip[1] - 4], [chest[0] - 8, chest[1] + 7], 24);
-            stroke([chest[0] - 11, chest[1] + 9], [chest[0] + 11, chest[1] + 9], 4);
+            stroke([hip[0] - 7, hip[1] - 4], [chest[0] - 8, chest[1] + 7], 34);
+            stroke([chest[0] - 11, chest[1] + 9], [chest[0] + 11, chest[1] + 9], 8);
         }
         limb(hip, frontFoot, 31, -1, weight);
-        stroke(frontFoot, [frontFoot[0] + 9, frontFoot[1]], weight);
-        limb(chest, [p.frontX, p.frontY], 27, 1, weight);
-        const neck: Point = [chest[0] + 2, chest[1] - 10];
-        stroke(chest, neck, weight);
-        const head = transform([neck[0] + 1, neck[1] - 13]);
+        foot(frontFoot);
+        limb(chest, [p.frontX, p.frontY], 27, 1, weight, FIGURE.fist);
+        // No neck: the head circle overlaps the shoulder mass, as in the reference.
+        const head = transform([chest[0] + 3, chest[1] - FIGURE.headDrop]);
         if (f.charge > .08) {
             for (let i = 3; i >= 1; i--) {
-                g.fillStyle(0x111111, alpha * f.charge * .04).fillCircle(head[0] - f.face * i * 15 * f.charge, head[1], (12 + i) * scale);
+                g.fillStyle(0x111111, alpha * f.charge * .04).fillCircle(head[0] - f.face * i * 15 * f.charge, head[1], (FIGURE.head + i) * scale);
             }
             for (let i = 0; i < 4; i++) {
                 const x = f.x - f.face * (35 + i * 9), y = f.y - f.z - 30 - i * 22;
                 g.lineStyle(2, 0x999990, f.charge * .2).lineBetween(x, y, x - f.face * (32 + i * 7) * f.charge, y);
             }
         }
-        g.fillStyle(bodyColor, alpha).fillCircle(...head, 12 * scale);
+        g.fillStyle(bodyColor, alpha).fillCircle(...head, FIGURE.head * scale);
         if (f.telegraph > 0) {
-            const y = f.y - f.z - 151 * scale;
+            const y = f.y - f.z - 140 * scale;
             g.fillStyle(0xb73232, .8).fillTriangle(f.x - 4, y, f.x + 4, y, f.x, y + 8);
         }
     }

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { B, difficulty, killValue } from './balance';
+import { B, REACH, difficulty, killValue } from './balance';
 import { Fighter } from './Fighter';
 import { StickFigure } from './StickFigure';
 import { Input, type Action } from './Input';
@@ -65,7 +65,7 @@ export class Arena extends Phaser.Scene {
         this.lastKill = -10;
         this.stamina = new Stamina();
         this.controls = new Input(this);
-        this.cameras.main.setScroll(0, 0);
+        this.cameras.main.setScroll((B.arenaWidth - B.view) / 2, 0);
         this.hallway = new Hallway(this);
         const g = this.add.graphics().setScrollFactor(0);
         g.lineStyle(1, 0xd8d8d3);
@@ -85,9 +85,9 @@ export class Arena extends Phaser.Scene {
         this.label(48, 728, '← / →   MOVE      A   PUNCH      S   KICK      D   LAUNCH KICK      W   DODGE', 12);
         this.label(48, 756, 'CTRL   RUN      SPACE   JUMP      ↑ + A   UPPERCUT      ↓ + S   SLAM      ESC   PAUSE', 11, '#85857f');
         this.label(1232, 753, 'SURVIVE. IMPROVISE. REPEAT.', 10, '#85857f').setOrigin(1, 0);
-        this.player = this.addFighter(new Fighter(640, B.floor, true));
+        this.player = this.addFighter(new Fighter(B.arenaWidth / 2, B.floor, true));
         this.spawn();
-        this.spawnClock = 4;
+        this.spawnClock = 1.2;
         this.overlay = this.add.container(0, 0).setDepth(10000).setScrollFactor(0);
         if (!this.started)
             this.showOverlay('MAKE A LITTLE CHAOS.', 'Arrows to move. A punches. S kicks.\nD launches. Space follows. A / S attack in midair.', 'ENTER / CLICK TO FIGHT');
@@ -110,7 +110,9 @@ export class Arena extends Phaser.Scene {
     else
         this.overlay.removeAll(true); }
     addFighter(f: Fighter) { this.fighters.push(f); this.views.set(f, new StickFigure(this)); return f; }
-    spawn(fatty = false) { const left = Math.random() < .5; const cameraX = this.cameras.main.scrollX; const x = left ? Math.min(cameraX - 80, this.player.x - 720) : Math.max(cameraX + 1360, this.player.x + 720); const f = this.addFighter(new Fighter(x, B.floor, false, fatty)); f.cooldown = .8 + Math.random(); if (fatty) {
+    // Walk in from just beyond the view so fights start in seconds, falling back to the far
+    // side when the player is pinned against a wall and the near side is out of bounds.
+    spawn(fatty = false) { const cameraX = this.cameras.main.scrollX; const edge = 70; const leftX = cameraX - edge, rightX = cameraX + B.view + edge; const leftOk = leftX > edge, rightOk = rightX < B.arenaWidth - edge; const left = leftOk && rightOk ? Math.random() < .5 : leftOk; const x = Phaser.Math.Clamp(left ? leftX : rightX, edge, B.arenaWidth - edge); const f = this.addFighter(new Fighter(x, B.floor, false, fatty)); f.cooldown = .8 + Math.random(); if (fatty) {
         f.z = 180;
         this.announce('HEAVY COMPANY  /  FATTY • KILL FOR +12 HP');
         this.cameras.main.shake(180, .003);
@@ -203,18 +205,16 @@ export class Arena extends Phaser.Scene {
             if (!f.held)
                 this.integrate(f, dt);
         }
+        // Clamped here rather than in integrate so knockback still carries free bodies past the edges.
+        p.x = Phaser.Math.Clamp(p.x, 40, B.arenaWidth - 40);
         if (this.held) {
-            this.held.x = p.x + p.face * 32;
+            this.held.x = p.x + p.face * REACH.hold;
             this.held.y = p.y;
-            this.held.z = p.z + 40;
+            this.held.z = p.z + REACH.holdZ;
         }
         this.bodyCollisions();
         for (const f of [...this.fighters])
             if (f.dead && f.deathTime > 2.6)
-                this.remove(f);
-        // Recycle distant pursuers so running cannot strand the spawn population.
-        for (const f of [...this.fighters])
-            if (!f.player && !f.held && Math.abs(f.x - p.x) > B.despawnDistance)
                 this.remove(f);
         const bodies = this.fighters.filter(f => f.dead);
         while (bodies.length > B.maxBodies)
@@ -255,7 +255,7 @@ export class Arena extends Phaser.Scene {
             if (target === f || target.dead || target.held || target.player === f.player)
                 continue;
             const dx = target.x - f.x;
-            if (Math.abs(dx) > (heavy ? 115 : 85) || dx * f.face < -28 || Math.abs(target.y - f.y) > 45 || Math.abs(target.z - f.z) > 105)
+            if (Math.abs(dx) > (heavy ? REACH.heavy : REACH.light) || dx * f.face < -REACH.behind || Math.abs(target.y - f.y) > REACH.vertical || Math.abs(target.z - f.z) > REACH.air)
                 continue;
             const damage = f.player ? (a.launcher ? 20 : heavy ? 36 : 18) : (f.fatty ? 18 : 8);
             const groundedFatty = target.fatty && a.limb === 'foot';
@@ -293,7 +293,7 @@ export class Arena extends Phaser.Scene {
         this.sfx.play(heavy);
         this.freeze = heavy ? .045 : .018;
         this.cameras.main.shake(heavy ? 100 : 50, heavy ? .003 : .001);
-        this.impact(f.x, f.y - f.z - 45, heavy);
+        this.impact(f.x, f.y - f.z - REACH.impactY, heavy);
         if (credit) {
             this.combo++;
             this.best = Math.max(this.best, this.combo);
@@ -348,18 +348,18 @@ export class Arena extends Phaser.Scene {
         }
         if (f.attack)
             return;
-        if (Math.abs(dx) < 65 && f.cooldown <= 0 && p.z < 90) {
+        if (Math.abs(dx) < REACH.aiAttack && f.cooldown <= 0 && p.z < 90) {
             f.telegraph = f.fatty ? .65 : .42;
             return;
         }
-        if (Math.abs(dx) > 52) {
+        if (Math.abs(dx) > REACH.aiStop) {
             const speed = difficulty(this.elapsed).speed * (f.fatty ? .68 : 1);
             f.x += Math.sign(dx) * speed * dt;
             f.moving = true;
         }
         for (const other of this.fighters)
-            if (other !== f && !other.dead && !other.player && other.z < 5 && Math.abs(f.x - other.x) < 30)
-                f.x += (f.x >= other.x ? 1 : -1) * 30 * dt;
+            if (other !== f && !other.dead && !other.player && other.z < 5 && Math.abs(f.x - other.x) < REACH.aiSpread)
+                f.x += (f.x >= other.x ? 1 : -1) * REACH.aiSpread * dt;
     }
     integrate(f: Fighter, dt: number) {
         if (f.hurtHold > 0 && !f.dead) { f.hurtHold = Math.max(0, f.hurtHold - dt); return; }
@@ -402,7 +402,7 @@ export class Arena extends Phaser.Scene {
         for (const t of this.fighters) {
             if (t === f || t.player || t.dead || t.held || f.hitTargets.has(t))
                 continue;
-            if (Math.abs(t.x - f.x) < 38 && Math.abs(t.y - f.y) < 30 && Math.abs(t.z - f.z) < 65) {
+            if (Math.abs(t.x - f.x) < REACH.bodyX && Math.abs(t.y - f.y) < REACH.bodyY && Math.abs(t.z - f.z) < REACH.bodyZ) {
                 f.hitTargets.add(t);
                 this.hit(t, 25, f.vx * .7, 320, true, true);
                 t.vy = f.vy * .65;
@@ -422,7 +422,7 @@ export class Arena extends Phaser.Scene {
     render() {
         const camera = this.cameras.main;
         if (this.started && !this.paused && !this.over) {
-            const target = this.player.x - 640 + this.player.face * 65;
+            const target = Phaser.Math.Clamp(this.player.x - B.view / 2 + this.player.face * 65, 0, B.arenaWidth - B.view);
             const blend = 1 - Math.exp(-5 * Math.min(this.game.loop.delta / 1000, .05));
             camera.scrollX += (target - camera.scrollX) * blend;
         }

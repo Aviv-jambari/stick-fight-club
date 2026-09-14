@@ -1,5 +1,9 @@
-export const B = { maxHP: 100, enemyHP: 80, fattyHP: 160, fattyHeal: 12, normalScore: 100, fattyScore: 400, playerSpeed: 285, gravity: 1550, jump: 640, maxEnemies: 12, maxBodies: 10, comboTimeout: 2.3, firstFatty: 35, fattyInterval: 42, floor: 555, despawnDistance: 2200 };
-export function difficulty(seconds: number) { return { cap: Math.min(B.maxEnemies, seconds < 20 ? 1 : seconds < 50 ? 2 : 3 + Math.floor((seconds - 50) / 45)), interval: Math.max(.65, 4 - seconds / 100), speed: Math.min(140, 65 + seconds / 7) }; }
+/** One knob for silhouette size and every reach that has to track it. */
+const SCALE = 1.3;
+export const B = { maxHP: 100, enemyHP: 80, fattyHP: 160, fattyHeal: 12, normalScore: 100, fattyScore: 400, playerSpeed: 285, gravity: 1550, jump: 640, maxEnemies: 12, maxBodies: 10, comboTimeout: 2.3, firstFatty: 35, fattyInterval: 42, floor: 555, ceiling: 240, arenaWidth: 3840, view: 1280, figureScale: SCALE };
+/** Hit volumes and AI spacing, scaled with the silhouette so contact stays visually honest. */
+export const REACH = { heavy: 115 * SCALE, light: 85 * SCALE, behind: 28 * SCALE, vertical: 45 * SCALE, air: 105 * SCALE, aiAttack: 65 * SCALE, aiStop: 52 * SCALE, aiSpread: 30 * SCALE, bodyX: 38 * SCALE, bodyY: 30 * SCALE, bodyZ: 65 * SCALE, hold: 32 * SCALE, holdZ: 40 * SCALE, impactY: 45 * SCALE };
+export function difficulty(seconds: number) { return { cap: Math.min(B.maxEnemies, seconds < 20 ? 2 : seconds < 50 ? 3 : 4 + Math.floor((seconds - 50) / 40)), interval: Math.max(.65, 2.5 - seconds / 140), speed: Math.min(210, 150 + seconds / 9) }; }
 export function killValue(fatty: boolean, combo: number) { return (fatty ? B.fattyScore : B.normalScore) * (1 + Math.min(4, Math.floor(combo / 5)) * .25); }
 
 

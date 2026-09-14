@@ -60,7 +60,7 @@ No campaign, progression, inventory, multiplayer or additional enemy types are i
 
 
 
-The hallway has no horizontal end walls. Up/Down only modify attacks; they do not move characters in depth. Enemies spawn beyond the camera edges, and distant pursuers are recycled to keep the population bounded.
+The hallway is a bounded arena `B.arenaWidth` units wide with walls at both ends; the camera and the player both stop there, so retreating forever is no longer an option. Up/Down only modify attacks; they do not move characters in depth. Enemies walk in from just beyond the view on either side, falling back to the far side when the player is pinned against a wall.
 
 
 
@@ -68,4 +68,4 @@ The hallway has no horizontal end walls. Up/Down only modify attacks; they do no
 
 Enemies are dark red from head to feet; the player remains black. Normal grounded punches and kicks use a short held pain pose rather than launching the target. Jab/cross alternates arms, kicks have a wind-up and impact hold, and aerial kicks tuck the legs before extension. Deaths collapse onto the floor and settle before fading.
 
-Fatty takes damage from launcher/rising kicks but cannot be lifted by kicks. The opening caps active enemies at one for 0–20 seconds, two for 20–50 seconds, then three and gradually more (maximum 12). Spawn intervals start at four seconds and aggression increases over time.
+Fatty takes damage from launcher/rising kicks but cannot be lifted by kicks. The opening caps active enemies at two for 0–20 seconds, three for 20–50 seconds, then four and gradually more (maximum 12). Spawn intervals start at 2.5 seconds and aggression increases over time. Enemies start at 150 units/second and top out at 210, which keeps them slower than the 285 walk and well under the 480 sprint.

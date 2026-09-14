@@ -104,7 +104,8 @@ test('Fatty kill heals 12 HP, clamps health, and cannot award twice', () => {
         assert.equal(a.fattys, 1);
     }
 });
-test('dodge immunity and floor bounce work without horizontal arena walls', () => {
+// The arena walls clamp the player in update(), so integrate() must still let launched bodies fly past.
+test('dodge immunity and floor bounce leave launched bodies unclamped', () => {
     const a = setup();
     a.player.invulnerable = .2;
     a.hit(a.player, 18, 100, 0, false, false);
@@ -146,6 +147,20 @@ test('camera follows horizontally and stops while paused', () => {
     a.paused = true;
     a.render();
     assert.equal(drawnAt, before);
+});
+test('the camera stops at the arena walls instead of scrolling forever', () => {
+    const { B } = load('src/game/balance.ts');
+    const limit = B.arenaWidth - B.view;
+    for (const [x, bound] of [[B.arenaWidth * 4, limit], [-B.arenaWidth, 0]] as [number, number][]) {
+        const a = setup();
+        a.started = true;
+        a.player.x = x;
+        a.cameras.main.scrollX = bound;
+        a.game = { loop: { delta: 16 } };
+        a.hallway = { draw() { } };
+        for (let i = 0; i < 400; i++) a.render();
+        assert.ok(Math.abs(a.cameras.main.scrollX - bound) < .5, `camera left the arena chasing x=${x}`);
+    }
 });
 test('punch and kick buttons select distinct attack limbs', () => {
     const a = setup();
