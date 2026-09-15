@@ -22,3 +22,17 @@ test('Fatty is worth four normal kills at every combo multiplier', () => { for (
     assert.equal(killValue(true, combo), 4 * killValue(false, combo)); });
 test('aggression outweighs passive survival and multiplier stays bounded', () => { assert.ok(10 * killValue(false, 15) + 300 > 480); assert.equal(killValue(false, 10000), killValue(false, 20)); assert.equal(B.fattyHeal / B.maxHP, .12); });
 
+
+
+test('difficulty selections increase population, pace and enemy speed', () => {
+    for (const t of [0, 30, 90]) {
+        const easy = difficulty(t, 'easy'), normal = difficulty(t, 'normal'), hard = difficulty(t, 'hard');
+        assert.ok(easy.cap < normal.cap && normal.cap < hard.cap);
+        assert.ok(easy.interval > normal.interval && normal.interval > hard.interval);
+        assert.ok(easy.speed < normal.speed && normal.speed < hard.speed);
+    }
+    for (const mode of ['easy', 'normal', 'hard'] as const) {
+        assert.equal(difficulty(1e9, mode).cap, B.maxEnemies);
+        assert.ok(difficulty(1e9, mode).speed < B.playerSpeed);
+    }
+});

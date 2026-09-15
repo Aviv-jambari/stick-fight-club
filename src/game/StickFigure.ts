@@ -2,18 +2,18 @@ import Phaser from 'phaser';
 import { B } from './balance';
 import { Fighter } from './Fighter';
 
-/** Silhouette weights. Thinner than the StickNodes stills so limbs read as sticks, not sausages. */
-const FIGURE = { limb: 10, torso: 13, fattyLimb: 15, fattyTorso: 28, head: 13, headDrop: 16, fist: 1.25, foot: 11, footWidth: 8 };
+/** Round head, slim trunk, and uniform rounded limbs from the supplied pose references. */
+const FIGURE = { limb: 9, torso: 12, fattyLimb: 15, fattyTorso: 28, head: 14, headDrop: 16, fist: 1, foot: 11, footWidth: 8 };
 
 /**
  * Half a step, the peak toe clearance, and the fraction of a cycle a foot stays planted.
  * reach must stay under sqrt(LEG^2 - hip^2) or the leg solver clamps at full extension and
  * the planted foot silently leaves the floor.
  */
-export const STRIDE = { reach: 36, lift: 17, stance: .62 };
+export const STRIDE = { reach: 34, lift: 12, stance: .62 };
 /** Standing hip height and the length of each of the two leg segments. Total leg exceeds the
  *  hip height on purpose, so knees stay bent in a fighting crouch and the stride can open up. */
-export const RIG = { hip: 54, leg: 35 };
+export const RIG = { hip: 57, leg: 36 };
 
 /**
  * One foot through a walk cycle. Planted feet slide backward under the hip at a constant
@@ -33,11 +33,13 @@ type Pose = { hipX: number; hipY: number; lean: number; frontX: number; frontY: 
 /** Drawn size of a fighter. Stride cadence needs this too, since it scales the step length. */
 export const figureScale = (f: Fighter) => (f.fatty ? 1.35 : 1) * B.figureScale;
 
-/** Neutral fighting stance: fists at the chin, feet apart. */
-const GUARD = { frontX: 19, frontY: -103, backX: 0, backY: -98, frontFootX: 24, backFootX: -26 };
+/** Reference ready pose: open arms below the shoulders and a wide, bent-knee base. */
+const GUARD = { frontX: 31, frontY: -77, backX: -24, backY: -79, frontFootX: 24, backFootX: -26 };
 
 export class StickFigure {
     g: Phaser.GameObjects.Graphics;
+    parts: { x: number; y: number; length: number; width: number; angle: number }[] = [];
+    debris?: { x: number; y: number; length: number; width: number; angle: number; vx: number; vy: number; spin: number }[];
     pose: Pose = { hipX: 0, hipY: -RIG.hip, lean: 5, ...GUARD, frontFootY: 0, backFootY: 0, kick: 0 };
     constructor(scene: Phaser.Scene) { this.g = scene.add.graphics(); }
 
@@ -46,7 +48,32 @@ export class StickFigure {
         g.clear().setDepth(f.player ? 610 : f.held ? 620 : 600);
         const scale = figureScale(f);
         const alpha = f.dead ? Math.max(0, 1 - Math.max(0, f.deathTime - 1.4) / 1.2) : 1;
-        const bodyColor = f.player ? 0x111111 : 0x791f2a;
+        const bodyColor = f.player ? 0x000000 : 0x791f2a;
+        if (f.dead && !f.player) {
+            // Split the last visible pose into its actual head, torso, and limb segments.
+            this.debris ??= this.parts.map((part, i) => ({ ...part,
+                vx: f.vx * .35 + Math.cos(i * 2.4) * (100 + i * 8),
+                vy: -140 - (i % 4) * 55, spin: (i % 2 ? 1 : -1) * (3 + i % 5) }));
+            const t = f.deathTime;
+            for (const part of this.debris) {
+                const floor = f.y - part.width / 2;
+                const fall = Math.max(0, floor - part.y);
+                const land = (-part.vy + Math.sqrt(part.vy ** 2 + 1800 * fall)) / 900;
+                const after = Math.max(0, t - land);
+                const bounce = Math.min(120, (part.vy + 900 * land) * .22);
+                const y = t < land ? part.y + part.vy * t + 450 * t * t
+                    : floor + Math.min(0, -bounce * after + 450 * after * after);
+                const x = part.x + part.vx * (t < land ? t : land + (1 - Math.exp(-5 * after)) / 5);
+                const angle = part.angle + part.spin * Math.min(t, land + bounce / 450);
+                const dx = Math.cos(angle) * part.length / 2, dy = Math.sin(angle) * part.length / 2;
+                const cy = Math.min(y, floor - Math.abs(dy));
+                const fade = Math.max(0, Math.min(1, (2.6 - t) / .8));
+                g.lineStyle(part.width, bodyColor, fade).lineBetween(x - dx, cy - dy, x + dx, cy + dy);
+                g.fillStyle(bodyColor, fade).fillCircle(x - dx, cy - dy, part.width / 2).fillCircle(x + dx, cy + dy, part.width / 2);
+            }
+            return;
+        }
+        this.parts = [];
         const air = f.z > 5;
         const run = f.moving && !air && !f.attack;
         const cycle = f.phase / (Math.PI * 2);
@@ -55,17 +82,20 @@ export class StickFigure {
         const target: Pose = {
             hipX: 0,
             // Hips sit lowest through double support and rise over mid-stance, so twice per cycle.
-            hipY: -RIG.hip + (run ? -3 + 3 * Math.cos(2 * f.phase) : Math.sin(f.phase) * 1.2),
-            lean: run ? 10 : 5, ...GUARD,
+            hipY: -RIG.hip + (run ? -2 + 2 * Math.cos(2 * f.phase) : 3 + Math.sin(f.phase) * 1.2),
+            lean: run ? 6 : 8, ...GUARD,
             frontFootX: front[0], frontFootY: front[1],
             backFootX: back[0], backFootY: back[1],
             kick: 0,
         };
         if (run) {
-            // The guard stays up; arms counter-swing only slightly, as in the reference.
-            const swing = Math.sin(f.phase) * 6;
-            target.frontX = GUARD.frontX - swing;
-            target.backX = GUARD.backX + swing * .6;
+            // Hands hang near the hips and oppose their matching leg's travel.
+            // Use the foot cycle so arm motion stays synchronized with planted steps.
+            const swing = front[0] / STRIDE.reach;
+            target.frontX = 7 - swing * 18;
+            target.backX = 3 + swing * 18;
+            target.frontY = -53 - Math.max(0, -swing) * 7;
+            target.backY = -55 - Math.max(0, swing) * 7;
         }
         if (air) {
             target.lean = -7;
@@ -132,11 +162,24 @@ export class StickFigure {
             target.kick = 0;
         }
         if (f.held) { target.frontX = 28; target.frontY = -108; target.backX = -24; target.backY = -97; }
+        if (f.attack?.kind === 'spin') {
+            target.kick = 1; target.lean = -14;
+            target.frontX = 24; target.frontY = -83;
+            target.backX = -25; target.backY = -78;
+            target.backFootX = -20; target.backFootY = -28;
+        }
+        if (f.attack?.kind === 'grab') {
+            const tossing = f.attack.time / f.attack.duration > .3;
+            target.frontX = tossing ? 45 : 30; target.frontY = tossing ? -55 : -133;
+            target.backX = tossing ? 30 : 12; target.backY = tossing ? -65 : -125;
+            target.lean = tossing ? 25 : -12;
+        }
         const blend = f.hurtHold > 0 ? 1 : 1 - Math.exp(-38 * Math.min(g.scene.game.loop.delta / 1000, .05));
         for (const key of Object.keys(target) as (keyof Pose)[]) this.pose[key] += (target[key] - this.pose[key]) * blend;
         const p = this.pose;
-        const tumbling = f.dead || f.projectile > 0;
-        const angle = tumbling ? f.angle : 0;
+        const spinning = f.attack?.kind === 'spin';
+        const tumbling = f.dead || f.projectile > 0 || spinning;
+        const angle = spinning ? f.face * Math.PI * 2 * (f.attack!.time / f.attack!.duration) : tumbling ? f.angle : 0;
         // Tumble around the body's center, not the feet. Keep grounded bodies above the floor.
         const centerY = f.y - f.z - (tumbling ? (f.dead ? 30 + 32 * Math.abs(Math.cos(angle)) : 60) * scale : 0);
         const transform = ([x, y]: Point): Point => {
@@ -147,6 +190,9 @@ export class StickFigure {
         const stroke = (a: Point, b: Point, width = FIGURE.limb, color = bodyColor) => {
             const start = transform(a), end = transform(b);
             const radius = width * scale / 2;
+            this.parts.push({ x: (start[0] + end[0]) / 2, y: (start[1] + end[1]) / 2,
+                length: Math.hypot(end[0] - start[0], end[1] - start[1]), width: radius * 2,
+                angle: Math.atan2(end[1] - start[1], end[0] - start[0]) });
             // Layered translucent silhouettes provide a soft directional blur in Canvas and WebGL.
             if (f.charge > .08) {
                 for (let i = 3; i >= 1; i--) {
@@ -210,6 +256,7 @@ export class StickFigure {
             }
         }
         g.fillStyle(bodyColor, alpha).fillCircle(...head, FIGURE.head * scale);
+        this.parts.push({ x: head[0], y: head[1], length: 0, width: FIGURE.head * scale * 2, angle: 0 });
         if (f.telegraph > 0) {
             const y = f.y - f.z - 140 * scale;
             g.fillStyle(0xb73232, .8).fillTriangle(f.x - 4, y, f.x + 4, y, f.x, y + 8);

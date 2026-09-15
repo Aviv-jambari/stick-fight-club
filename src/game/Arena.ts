@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { B, REACH, difficulty, killValue } from './balance';
+import { B, REACH, difficulty, killValue, MODES, type Difficulty } from './balance';
 import { Fighter } from './Fighter';
 import { StickFigure, STRIDE, figureScale } from './StickFigure';
 import { Input, type Action } from './Input';
@@ -24,6 +24,7 @@ export class Arena extends Phaser.Scene {
     freeze = 0;
     chain = 0;
     chainClock = 0;
+    mode: Difficulty = 'normal';
     started = false;
     over = false;
     paused = false;
@@ -54,7 +55,7 @@ export class Arena extends Phaser.Scene {
         this.best = 0;
         this.comboClock = 0;
         this.spawnClock = 0;
-        this.fattyClock = B.firstFatty;
+        this.fattyClock = B.firstFatty * MODES[this.mode].fattyTime;
         this.freeze = 0;
         this.chain = 0;
         this.chainClock = 0;
@@ -84,23 +85,25 @@ export class Arena extends Phaser.Scene {
         this.notice = this.label(640, 268, '', 18, '#a32c2c').setOrigin(.5);
         this.label(48, 728, '← / →   MOVE      A   PUNCH      S   KICK      D   LAUNCH KICK      W   DODGE', 12);
         this.label(48, 756, 'CTRL   RUN      SPACE   JUMP      ↑ + A   UPPERCUT      ↓ + S   SLAM      ESC   PAUSE', 11, '#85857f');
-        this.label(1232, 753, 'SURVIVE. IMPROVISE. REPEAT.', 10, '#85857f').setOrigin(1, 0);
+        this.label(1232, 753, 'AIR: S SPIN / G GRAB', 10, '#85857f').setOrigin(1, 0);
         this.player = this.addFighter(new Fighter(B.arenaWidth / 2, B.floor, true));
         this.spawn();
         this.spawnClock = 1.2;
         this.overlay = this.add.container(0, 0).setDepth(10000).setScrollFactor(0);
         if (!this.started)
-            this.showOverlay('MAKE A LITTLE CHAOS.', 'Arrows to move. A punches. S kicks.\nD launches. Space follows. A / S attack in midair.', 'ENTER / CLICK TO FIGHT');
+            this.showStart();
         this.input.on('pointerdown', () => { if (!this.started) {
             this.started = true;
             this.overlay.removeAll(true);
             this.sfx.play();
         }
-        else if (this.over)
-            this.scene.restart(); });
+        else if (this.over) { this.started = false; this.scene.restart(); } });
         this.game.events.on('blur', this.onBlur, this);
         this.events.once('shutdown', () => this.game.events.off('blur', this.onBlur, this));
         this.refreshHUD();
+    }
+    showStart() {
+        this.showOverlay('MAKE A LITTLE CHAOS.', `1 EASY / 2 NORMAL / 3 HARD - ${this.mode.toUpperCase()} SELECTED\nD launch / SPACE jump / G grab & toss. Air S: spinning kick.`, 'CHOOSE DIFFICULTY, THEN ENTER / CLICK TO FIGHT');
     }
     onBlur() { if (this.started && !this.over && !this.paused)
         this.togglePause(); }
@@ -120,12 +123,18 @@ export class Arena extends Phaser.Scene {
     } }
     announce(text: string) { this.notice.setText(text).setAlpha(1); this.tweens.killTweensOf(this.notice); this.tweens.add({ targets: this.notice, alpha: 0, delay: 1250, duration: 450 }); }
     update(_time: number, delta: number) {
+        if (!this.started) {
+            for (const [key, mode] of [['ONE', 'easy'], ['TWO', 'normal'], ['THREE', 'hard']] as const) {
+                if (this.controls.pressed(key)) { this.mode = mode; this.fattyClock = B.firstFatty * MODES[mode].fattyTime; this.showStart(); this.refreshHUD(); }
+            }
+        }
         if (this.controls.pressed('M')) {
             this.sfx.muted = !this.sfx.muted;
             this.announce(this.sfx.muted ? 'SOUND OFF' : 'SOUND ON');
         }
         if (this.controls.pressed('ENTER')) {
             if (this.over) {
+                this.started = false;
                 this.scene.restart();
                 return;
             }
@@ -162,16 +171,16 @@ export class Arena extends Phaser.Scene {
         }
         this.bufferTime -= dt;
         if (p.stun <= 0) {
-            if (axis.x)
+            if (axis.x && !this.held)
                 p.face = axis.x;
             if (this.controls.pressed('SPACE') && p.z === 0)
                 p.vz = B.jump;
-            if (this.controls.pressed('W') && p.cooldown <= 0) {
+            if (this.controls.pressed('W') && p.cooldown <= 0 && !this.held) {
                 p.vx = (axis.x || p.face) * 780;
                 p.invulnerable = .3;
                 p.cooldown = .65;
             }
-            if (this.buffer && this.bufferTime > 0 && (!p.attack || p.attack.time > p.attack.duration * .65)) {
+            if (!this.held && this.buffer && this.bufferTime > 0 && (!p.attack || p.attack.time > p.attack.duration * .65)) {
                 this.act(this.buffer);
                 this.buffer = undefined;
             }
@@ -223,14 +232,14 @@ export class Arena extends Phaser.Scene {
         const bodies = this.fighters.filter(f => f.dead);
         while (bodies.length > B.maxBodies)
             this.remove(bodies.shift()!);
-        const d = difficulty(this.elapsed);
+        const d = difficulty(this.elapsed, this.mode);
         this.spawnClock -= dt;
         this.fattyClock -= dt;
         if (this.spawnClock <= 0 && this.fighters.filter(f => !f.player && !f.dead).length < d.cap) {
             const fatty = this.fattyClock <= 0;
             this.spawn(fatty);
             if (fatty)
-                this.fattyClock = B.fattyInterval;
+                this.fattyClock = B.fattyInterval * MODES[this.mode].fattyTime;
             this.spawnClock = d.interval;
         }
         this.refreshHUD();
@@ -238,6 +247,22 @@ export class Arena extends Phaser.Scene {
     }
     act(action: Action) {
         const p = this.player;
+        if (this.held) return;
+        if (action === 'grab') {
+            if (p.z < 35) return;
+            const target = this.fighters.filter(f => !f.player && !f.dead && !f.fatty && !f.held && f.z > 30 && f.stun > 0 && Math.abs(f.x - p.x) < REACH.heavy && Math.abs(f.z - p.z) < REACH.air)
+                .sort((a, b) => Math.abs(a.x - p.x) - Math.abs(b.x - p.x))[0];
+            if (!target) { this.announce('G: GRAB A LAUNCHED ENEMY IN MIDAIR'); return; }
+            this.held = target; target.held = true; target.attack = undefined; target.projectile = 0;
+            target.vx = target.vz = 0; target.angle = 0;
+            p.vx = 0; p.vz = Math.max(p.vz, 160);
+            p.attack = { kind: 'grab', time: 0, duration: .65, hit: false, step: 1, limb: 'hand' };
+            this.announce('AIR GRAB'); return;
+        }
+        if (action === 'heavy' && p.z > 20 && this.controls.axis().y <= 0) {
+            p.attack = { kind: 'spin', time: 0, duration: .52, hit: false, step: 1, limb: 'foot' };
+            p.vx = p.face * 220; return;
+        }
         if (action === 'launch') {
             p.attack = { kind: 'upper', time: 0, duration: .42, hit: false, step: 1, limb: 'foot', launcher: true };
             p.vx = p.face * 90;
@@ -254,18 +279,28 @@ export class Arena extends Phaser.Scene {
     }
     attackHits(f: Fighter) {
         const a = f.attack!;
+        if (a.kind === 'grab') {
+            const target = this.held;
+            if (target) {
+                target.held = false; this.held = undefined; target.invulnerable = 0;
+                target.x = f.x + f.face * REACH.hold; target.y = f.y; target.z = Math.max(35, f.z);
+                this.hit(target, 40, f.face * 210, -1150, true, true);
+                target.slamImpact = true; this.announce('BODY SLAM');
+            }
+            return;
+        }
         const heavy = a.kind !== 'light';
         for (const target of this.fighters) {
             if (target === f || target.dead || target.held || target.player === f.player)
                 continue;
             const dx = target.x - f.x;
-            if (Math.abs(dx) > (heavy ? REACH.heavy : REACH.light) || dx * f.face < -REACH.behind || Math.abs(target.y - f.y) > REACH.vertical || Math.abs(target.z - f.z) > REACH.air)
+            if (Math.abs(dx) > (heavy ? REACH.heavy : REACH.light) || (a.kind !== 'spin' && dx * f.face < -REACH.behind) || Math.abs(target.y - f.y) > REACH.vertical || Math.abs(target.z - f.z) > REACH.air)
                 continue;
             const damage = f.player ? (a.launcher ? 20 : heavy ? 36 : 18) : (f.fatty ? 18 : 8);
             const groundedFatty = target.fatty && a.limb === 'foot';
             const regular = a.kind === 'light' || a.kind === 'heavy';
             const recoil = (regular && target.z === 0) || groundedFatty;
-            this.hit(target, damage, f.face * (recoil ? 80 : a.launcher ? 110 : heavy ? 610 : 175), recoil ? 0 : a.launcher ? 680 : a.kind === 'upper' ? 760 : a.kind === 'slam' ? -650 : heavy ? 260 : 80, heavy, f.player, recoil);
+            this.hit(target, damage, f.face * (recoil ? 80 : a.launcher ? 110 : heavy ? 610 : 175), recoil ? 0 : a.launcher ? 680 : a.kind === 'upper' ? 760 : a.kind === 'spin' ? 260 : a.kind === 'slam' ? -650 : heavy ? 260 : 80, heavy, f.player, recoil);
             if (groundedFatty) { target.z = 0; target.vz = 0; target.projectile = 0; }
             if (f.player && a.kind === 'slam' && !groundedFatty) {
                 target.z = Math.max(target.z, 30);
@@ -277,8 +312,9 @@ export class Arena extends Phaser.Scene {
     hit(f: Fighter, damage: number, vx: number, vz: number, heavy: boolean, credit: boolean, recoil = false) {
         if (f.invulnerable > 0 || f.dead)
             return;
+        if (f.player && this.held) { this.held.held = false; this.held.stun = .5; this.held = undefined; }
         f.hp -= damage;
-        f.stun = heavy ? .65 : .26;
+        f.stun = (heavy ? .65 : .26) * (f.fatty ? .7 : 1);
         f.attack = undefined;
         f.telegraph = 0;
         f.hurtHold = recoil ? .11 : 0;
@@ -347,18 +383,18 @@ export class Arena extends Phaser.Scene {
             f.telegraph -= dt;
             if (f.telegraph <= 0) {
                 f.attack = { kind: 'light', time: 0, duration: .38, hit: false, step: 1 };
-                f.cooldown = 1 + Math.random() * 1.2;
+                f.cooldown = (1 + Math.random() * 1.2) * MODES[this.mode].aggression;
             }
             return;
         }
         if (f.attack)
             return;
         if (Math.abs(dx) < REACH.aiAttack && f.cooldown <= 0 && p.z < 90) {
-            f.telegraph = f.fatty ? .65 : .42;
+            f.telegraph = (f.fatty ? .65 : .42) * MODES[this.mode].aggression;
             return;
         }
         if (Math.abs(dx) > REACH.aiStop) {
-            const speed = difficulty(this.elapsed).speed * (f.fatty ? .68 : 1);
+            const speed = difficulty(this.elapsed, this.mode).speed * (f.fatty ? .68 : 1);
             f.x += Math.sign(dx) * speed * dt;
             f.moving = true;
             f.speed = speed;
@@ -377,6 +413,12 @@ export class Arena extends Phaser.Scene {
             f.vz -= B.gravity * dt;
         if (f.z <= 0) {
             f.z = 0;
+            if (f.slamImpact) {
+                f.slamImpact = false; f.invulnerable = 0;
+                this.hit(f, 35, f.vx * .3, 0, true, true, true);
+                this.impact(f.x, f.y, true); this.cameras.main.shake(180, .006);
+                f.vz = 0; this.score += 50;
+            }
             if (f.vz < -420) {
                 f.vz = -f.vz * .32;
                 f.vx *= .7;
@@ -424,7 +466,7 @@ export class Arena extends Phaser.Scene {
     } this.tweens.add({ targets: g, alpha: 0, duration: 180, onComplete: () => g.destroy() }); }
     remove(f: Fighter) { this.views.get(f)?.destroy(); this.views.delete(f); this.fighters = this.fighters.filter(x => x !== f); }
     formatTime() { return `${Math.floor(this.elapsed / 60).toString().padStart(2, '0')}:${Math.floor(this.elapsed % 60).toString().padStart(2, '0')}`; }
-    refreshHUD() { this.staminaLabel.setText(`STAMINA  ${Math.ceil(this.stamina.value)}%${this.stamina.exhausted ? " / REST" : ""}`); this.staminaBar.clear().fillStyle(0xe2e2dc).fillRect(300, 200, 180, 5).fillStyle(this.stamina.exhausted ? 0xaaaaa0 : 0x66665c).fillRect(300, 200, 180 * this.stamina.value / SPRINT.max, 5); this.hud.setText(`${Math.floor(this.score + this.elapsed).toString().padStart(6, '0')}\n`).setFontSize(28); this.stats.setText(`${this.formatTime()} SURVIVED\n${this.kills} DEFEATED`); this.health.clear().fillStyle(0xe2e2dc).fillRect(48, 200, 210, 5).fillStyle(0x202020).fillRect(48, 200, 210 * Math.max(0, this.player.hp) / 100, 5); this.comboText.setText(this.combo > 1 ? `${this.combo} HIT COMBO` : ''); }
+    refreshHUD() { this.staminaLabel.setText(`STAMINA  ${Math.ceil(this.stamina.value)}%${this.stamina.exhausted ? " / REST" : ""}`); this.staminaBar.clear().fillStyle(0xe2e2dc).fillRect(300, 200, 180, 5).fillStyle(this.stamina.exhausted ? 0xaaaaa0 : 0x66665c).fillRect(300, 200, 180 * this.stamina.value / SPRINT.max, 5); this.hud.setText(`${Math.floor(this.score + this.elapsed).toString().padStart(6, '0')}\n`).setFontSize(28); this.stats.setText(`${this.formatTime()} SURVIVED\n${this.kills} DEFEATED / ${this.mode.toUpperCase()}`); this.health.clear().fillStyle(0xe2e2dc).fillRect(48, 200, 210, 5).fillStyle(0x202020).fillRect(48, 200, 210 * Math.max(0, this.player.hp) / 100, 5); this.comboText.setText(this.combo > 1 ? `${this.combo} HIT COMBO` : ''); }
     render() {
         const camera = this.cameras.main;
         if (this.started && !this.paused && !this.over) {
@@ -443,4 +485,3 @@ export class Arena extends Phaser.Scene {
         for (const f of this.fighters) this.views.get(f)?.draw(f);
     }
 }
-

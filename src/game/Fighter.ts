@@ -1,6 +1,6 @@
 import { B } from './balance';
 export type Attack = {
-    kind: 'light' | 'heavy' | 'upper' | 'slam';
+    kind: 'light' | 'heavy' | 'upper' | 'slam' | 'spin' | 'grab';
     time: number;
     duration: number;
     hit: boolean;
@@ -36,6 +36,7 @@ export class Fighter {
     charge = 0;
     attack?: Attack;
     held = false;
+    slamImpact = false;
     hitTargets = new Set<Fighter>();
     telegraph = 0;
     constructor(x: number, y: number, public player = false, public fatty = false) { this.x = x; this.y = y; this.hp = this.maxHP = player ? B.maxHP : fatty ? B.fattyHP : B.enemyHP; }

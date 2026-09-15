@@ -22,8 +22,11 @@ Open the local URL printed by Vite. `npm run build` typechecks and creates `dist
 | S | Kick / foot attacks |
 | A, A, S | Rising kick launcher |
 | Up + A | Uppercut |
-| Down + S or airborne S | Ground slam / aerial kick |
-| D | Rising launcher kick; follow with Space, then A / S in midair |
+| Down + S | Downward slam kick |
+| Airborne S | Full-turn spinning kick, hitting both sides |
+| Airborne G | Grab a nearby launched regular enemy and automatically toss them down |
+| 1 / 2 / 3 before starting | Easy / Normal / Hard |
+| D | Rising launcher kick; follow with Space, then G to grab and body slam |
 | W | Dodge |
 | Escape | Pause / resume |
 | M | Toggle impact audio |
@@ -46,12 +49,12 @@ Enemies telegraph attacks with a red marker. Heavyweights arrive after 35 second
 
 This is a combat prototype, not a completed animation system. Characters use procedural joints and continuous attack curves, with smoothed pose transitions across cancels. Physics uses a separate jump height above a fixed hallway floor, axis-based hit volumes, gravity, friction, floor bounce and whole-body tumble. It is ragdoll-like, not a constrained per-limb physics simulation. AI is deliberately simple. The scene keeps orchestration in one place; rendering, state, input, sound and balance are separate. Some attack values remain next to the combat code pending tuning.
 
-Normal enemies have 80 HP; Fatty has 160. Active enemies cap at 12 and corpses at 10 with a 2.6-second lifetime. Collision checks are bounded. Performance targets 60 FPS but needs profiling on target hardware.
+Normal enemies have 80 HP; Fatty has 210. Active enemies cap at 12 and corpses at 10 with a 2.6-second lifetime. Collision checks are bounded. Performance targets 60 FPS but needs profiling on target hardware.
 
 ## First playtest priorities
 
 1. Run into an enemy, A → A → S, Space, A or S. Tune launcher height, follow speed and air hit reach before adding features.
-2. Press D near an enemy, wait briefly, jump with Space, then punch with A or spike them down with S. Check air reach and follow-up timing.
+2. Press D near an enemy, wait briefly, jump with Space, then press G to grab and toss them, S to spin, or Down + S to spike them. Check air reach and follow-up timing.
 3. Tune pose curves, punch reach, input buffer and recovery; add better grounded knockdown poses.
 4. Test Fatty at low health and tune its telegraph, weight and frequency.
 5. Test a six-minute survival run for difficulty, readability and frame pacing.
@@ -66,6 +69,10 @@ The hallway is a bounded arena `B.arenaWidth` units wide with walls at both ends
 
 ## Combat animation and pacing
 
-Enemies are dark red from head to feet; the player remains black. Normal grounded punches and kicks use a short held pain pose rather than launching the target. Jab/cross alternates arms, kicks have a wind-up and impact hold, and aerial kicks tuck the legs before extension. Deaths collapse onto the floor and settle before fading.
+Enemies are dark red from head to feet; the player remains black. Normal grounded punches and kicks use a short held pain pose rather than launching the target. Jab/cross alternates arms, kicks have a wind-up and impact hold, and aerial kicks tuck the legs before extension. Eliminated enemies break into their actual head, torso, and limb segments; pieces scatter, bounce, settle, and fade over 2.6 seconds.
 
-Fatty takes damage from launcher/rising kicks but cannot be lifted by kicks. The opening caps active enemies at two for 0–20 seconds, three for 20–50 seconds, then four and gradually more (maximum 12). Spawn intervals start at 2.5 seconds and aggression increases over time. Enemies start at 150 units/second and top out at 210, which keeps them slower than the 285 walk and well under the 480 sprint.
+Fatty takes damage from launcher/rising kicks but cannot be lifted by kicks or grabbed in midair. Its 210 HP and 30% shorter hit stun make it harder to eliminate. Killing one still heals 12 HP.
+
+Choose 1 (Easy), 2 (Normal), or 3 (Hard) on the start screen. Restart returns to that screen so you can change difficulty. Normal starts with an active cap of three and 2.2-second spawn intervals. Easy lowers population and movement speed and gives longer attack warnings; Hard starts with a cap of five, increases movement and spawning pace by 25%, shortens attack warnings and recovery, and brings fatties sooner. All modes ramp over time, cap at 12 active enemies, and keep enemy movement below player walking speed.
+
+For the body slam, launch a regular enemy with D, jump after them with Space, then press G while close to the stunned airborne target. The grab lifts the target into a held pose and automatically throws them downward; the throw deals 40 damage and floor impact deals another 35. Getting hit interrupts the grab and releases the enemy. The airborne S spin strikes both sides for 36 damage per enemy; Down + S retains the downward kick.

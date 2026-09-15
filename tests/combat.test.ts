@@ -82,6 +82,7 @@ test('D launches a living enemy close enough for a delayed jump and aerial punch
     a.act('light'); a.attackHits(a.player);
     assert.equal(target.hp,42); assert.equal(a.combo,2);
     target.invulnerable=0;
+    a.controls.axis = () => ({ x: 0, y: 1 });
     a.act('heavy'); a.attackHits(a.player);
     assert.equal(a.player.attack.kind,'slam'); assert.ok(target.vz < 0);
 });
@@ -216,3 +217,44 @@ test('grounded deaths settle into a fallen pose instead of spinning forever', ()
     assert.ok(Math.abs(target.angle - Math.PI / 2) < .01);
 });
 
+
+
+test('air spin hits enemies on both sides once and keeps the downward kick available', () => {
+    const a = setup(); a.player.z = 120;
+    const left = new Fighter(400, 500), right = new Fighter(600, 500);
+    left.z = right.z = 120; a.fighters.push(left, right);
+    a.act('heavy'); assert.equal(a.player.attack.kind, 'spin'); a.attackHits(a.player);
+    assert.equal(left.hp, 44); assert.equal(right.hp, 44);
+    a.controls.axis = () => ({ x: 0, y: 1 }); a.act('heavy');
+    assert.equal(a.player.attack.kind, 'slam');
+});
+
+test('launch, delayed jump, grab and toss ends in one damaging floor impact', () => {
+    const a = setup(), target = new Fighter(550, 555); a.player.y = 555; a.fighters.push(target);
+    a.act('launch'); a.attackHits(a.player);
+    for (let i = 0; i < 9; i++) { a.integrate(target, 1/60); target.stun -= 1/60; }
+    a.player.vz = 640;
+    for (let i = 0; i < 14; i++) { a.integrate(target, 1/60); a.integrate(a.player, 1/60); target.stun -= 1/60; }
+    a.act('grab'); assert.equal(a.held, target); assert.equal(target.held, true);
+    a.attackHits(a.player); assert.equal(a.held, undefined); assert.equal(target.held, false);
+    assert.ok(target.vz < -1000); assert.equal(target.slamImpact, true);
+    for (let i = 0; i < 60 && target.slamImpact; i++) a.integrate(target, 1/60);
+    assert.equal(target.slamImpact, false); assert.equal(target.dead, true); assert.equal(a.kills, 1);
+    for (let i = 0; i < 60; i++) a.integrate(target, 1/60);
+    assert.equal(a.kills, 1);
+});
+
+test('air grabs reject grounded enemies and fatties, and release when interrupted', () => {
+    const a = setup(), target = new Fighter(540, 500), fatty = new Fighter(530, 500, false, true);
+    a.player.z = 100; fatty.z = 100; fatty.stun = 1; a.fighters.push(target, fatty);
+    a.act('grab'); assert.equal(a.held, undefined);
+    target.z = 100; target.stun = 1; a.act('grab'); assert.equal(a.held, target);
+    a.hit(a.player, 8, 50, 0, false, false);
+    assert.equal(a.held, undefined); assert.equal(target.held, false); assert.equal(a.player.attack, undefined);
+});
+
+test('fatties take more hits and recover sooner than normal enemies', () => {
+    const a = setup(), regular = new Fighter(550, 500), fatty = new Fighter(550, 500, false, true);
+    a.hit(regular, 36, 80, 0, true, true, true); a.hit(fatty, 36, 80, 0, true, true, true);
+    assert.ok(fatty.hp > 160); assert.ok(fatty.stun < regular.stun);
+});
